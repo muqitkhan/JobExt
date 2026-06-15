@@ -1,0 +1,36 @@
+name: Scraper broken
+description: Job description capture failed on a job site
+title: "[Scraper]: "
+labels: scraper
+body:
+  - type: input
+    id: site
+    attributes:
+      label: Job site
+      placeholder: e.g. LinkedIn, Indeed
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Example job URL (redact personal info if needed)
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Firefox
+        - Edge
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have been captured?
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+    validations:
+      required: true

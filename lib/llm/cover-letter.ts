@@ -1,0 +1,40 @@
+import type { JobPosting, LLMSettings } from '../types';
+import { chatLLM } from './chat';
+import { isCloudProvider } from './cloud-providers';
+import {
+  LLM_COVER_LETTER_TIMEOUT_MS,
+  LLM_CLOUD_COVER_TIMEOUT_MS,
+  withTimeout,
+} from './timeout';
+
+const COVER_LETTER_PATTERN =
+  /cover\s*letter|motivation\s*letter|letter\s+of\s+interest|submit\s+(?:a\s+)?letter|include\s+(?:a\s+)?letter/i;
+
+export function jobNeedsCoverLetter(description: string): boolean {
+  return COVER_LETTER_PATTERN.test(description);
+}
+
+export async function generateCoverLetter(
+  job: JobPosting,
+  settings: LLMSettings,
+  resumeTextForLetter: string,
+): Promise<string> {
+  const cloud = isCloudProvider(settings.provider);
+  const jobExcerpt = job.description.slice(0, cloud ? 1200 : 2500);
+  const resumeExcerpt = resumeTextForLetter.slice(0, cloud ? 1500 : 3500);
+
+  const system = `Write a concise human cover letter in plain text. Natural tone, 3 short paragraphs max, no placeholders.`;
+  const user = `Role: ${job.title}${job.company ? ` at ${job.company}` : ''}
+Job: ${jobExcerpt}
+Resume: ${resumeExcerpt}
+Return only the letter body.`;
+
+  const timeout = cloud ? LLM_CLOUD_COVER_TIMEOUT_MS : LLM_COVER_LETTER_TIMEOUT_MS;
+  const raw = await withTimeout(
+    chatLLM(settings, system, user, { jsonMode: false }),
+    timeout,
+    undefined,
+    'cover',
+  );
+  return raw.trim();
+}

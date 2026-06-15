@@ -1,0 +1,46 @@
+{
+  "name": "jobext",
+  "description": "Cross-browser extension to tailor your resume to job descriptions using a local LLM",
+  "private": false,
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "npm run icons && wxt build",
+    "build:firefox": "npm run icons && wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "icons": "node scripts/generate-icons.mjs",
+    "release": "node scripts/release/build.mjs",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "diff": "^7.0.0",
+    "docx": "^9.5.0",
+    "happy-dom": "^20.10.3",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.9.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.8",
+    "@types/diff": "^7.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@wxt-dev/module-react": "^1.1.5",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.1.8",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "wxt": "^0.20.26"
+  }
+}

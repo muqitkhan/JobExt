@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run release
+
+      - name: Upload macOS installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobext-macos
+          path: |
+            release/*.dmg
+            release/macos-intel/
+            release/macos-apple-silicon/
+
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run release
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobext-windows
+          path: |
+            release/*.zip
+            release/windows/
+
+  publish-github-release:
+    needs: [release-macos, release-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release-upload
+          find artifacts -type f \( -name "*.dmg" -o -name "*.zip" \) -exec cp {} release-upload/ \;
+          ls -la release-upload/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-upload/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

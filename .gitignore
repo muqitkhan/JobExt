@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# WXT output
+.wxt/
+.output/
+dist/
+
+# Release builds (re-run npm run release to regenerate)
+release/macos-intel/
+release/macos-apple-silicon/
+release/windows/
+release/*.dmg
+release/*.zip
+!release/README.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+
+# Test
+coverage/
+
+# Logs
+*.log
