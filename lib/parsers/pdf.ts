@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { ParsedResume, PdfTextRun } from '../types';
+import { layoutPdfItems } from './pdf-layout';
 import { splitIntoSections } from './sections';
 
 type ParsedResumeContent = Omit<ParsedResume, 'sourceBytes'>;
@@ -28,30 +29,51 @@ export async function parsePdf(buffer: ArrayBuffer, fileName: string): Promise<P
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
   const pages: string[] = [];
   const pdfTextRuns: PdfTextRun[] = [];
+  const parseWarnings: string[] = [];
+  let multiColumnDetected = false;
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     const pageIndex = i - 1;
-    const pageParts: string[] = [];
+    const layoutItems: Array<{
+      str: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }> = [];
 
     for (const item of content.items) {
       if (!('str' in item) || !item.str) continue;
       const tx = item.transform;
       const fontSize = Math.max(Math.abs(tx[0] ?? 0), Math.abs(tx[3] ?? 0), 10);
+      const x = tx[4] ?? 0;
+      const y = tx[5] ?? 0;
+      const width = item.width ?? 0;
+      const height = item.height ?? fontSize;
+
       pdfTextRuns.push({
         pageIndex,
         str: item.str,
-        x: tx[4] ?? 0,
-        y: tx[5] ?? 0,
-        width: item.width ?? 0,
-        height: item.height ?? fontSize,
+        x,
+        y,
+        width,
+        height,
         fontSize,
       });
-      pageParts.push(item.str);
+      layoutItems.push({ str: item.str, x, y, width, height });
     }
 
-    pages.push(pageParts.join(' '));
+    const { text, multiColumnLikely } = layoutPdfItems(layoutItems);
+    if (multiColumnLikely) multiColumnDetected = true;
+    pages.push(text);
+  }
+
+  if (multiColumnDetected) {
+    parseWarnings.push(
+      'Multi-column PDF layout detected — text order may be unreliable. DOCX usually parses more accurately.',
+    );
   }
 
   const plainText = pages.join('\n\n').trim();
@@ -61,5 +83,6 @@ export async function parsePdf(buffer: ArrayBuffer, fileName: string): Promise<P
     plainText,
     sections: splitIntoSections(plainText),
     pdfTextRuns,
+    parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
 }

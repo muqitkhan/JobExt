@@ -50,7 +50,9 @@ export default function App() {
 
   const baselineScore = useMemo<ATSScoreResult | null>(() => {
     if (!canScore || !resume || !job) return null;
-    return scoreResumeATS(resume.plainText, job);
+    const result = scoreResumeATS(resume.plainText, job);
+    if (!resume.parseWarnings?.length) return result;
+    return { ...result, warnings: [...resume.parseWarnings, ...result.warnings] };
   }, [canScore, resume, job]);
 
   const tailoredScore = useMemo<ATSScoreResult | null>(() => {

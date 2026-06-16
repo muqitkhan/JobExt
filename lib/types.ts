@@ -40,6 +40,8 @@ export interface ParsedResume {
   sourceBytes: ArrayBuffer;
   /** PDF text positions for in-place overlays (pdf only). */
   pdfTextRuns?: PdfTextRun[];
+  /** Parser warnings (e.g. multi-column PDF layout). */
+  parseWarnings?: string[];
 }
 
 export interface ResumeChange {

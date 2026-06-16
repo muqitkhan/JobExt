@@ -1,10 +1,9 @@
 import type { JobPosting } from '../types';
-import type { ATSCategoryScore, ATSScoreResult } from './types';
+import type { ATSCategoryScore, ATSScoreResult, WeightedTerm } from './types';
 import { gradeFromScore } from './types';
 import {
   DEGREE_TERMS,
   EXPERIENCE_SECTION_MARKERS,
-  STANDARD_SECTIONS,
 } from './taxonomy';
 import {
   containsTerm,
@@ -12,10 +11,16 @@ import {
   normalizeText,
   splitTitleWords,
 } from './keywords';
+import { detectStandardSections } from '../parsers/sections';
 
+/**
+ * Keyword match (40%) covers all extracted JD terms.
+ * Skills alignment (20%) re-scores taxonomy skills only — intentional overlap
+ * so skills weigh more without double-counting the full keyword list twice.
+ */
 const CATEGORY_WEIGHTS = {
-  keywords: 0.35,
-  skills: 0.25,
+  keywords: 0.4,
+  skills: 0.2,
   title: 0.15,
   experience: 0.15,
   format: 0.1,
@@ -27,7 +32,7 @@ function clamp(n: number): number {
 
 function scoreKeywords(
   resumeText: string,
-  keywords: ReturnType<typeof extractJobKeywords>,
+  keywords: WeightedTerm[],
 ): { score: number; matched: string[]; missing: string[]; detail: string } {
   if (keywords.length === 0) {
     return { score: 50, matched: [], missing: [], detail: 'Not enough job text to extract keywords.' };
@@ -59,32 +64,24 @@ function scoreKeywords(
 
 function scoreSkills(
   resumeText: string,
-  jobDescription: string,
+  skillTerms: WeightedTerm[],
 ): { score: number; detail: string } {
-  const keywords = extractJobKeywords({
-    title: '',
-    company: '',
-    location: '',
-    description: jobDescription,
-    source: '',
-    url: '',
-  });
-  const skills = keywords.filter((k) => k.source === 'skill');
-  if (skills.length === 0) {
+  if (skillTerms.length === 0) {
     return { score: 70, detail: 'No explicit skill terms detected in job post.' };
   }
 
   let hit = 0;
   let total = 0;
-  for (const s of skills) {
+  for (const s of skillTerms) {
     total += s.weight;
     if (containsTerm(resumeText, s.term)) hit += s.weight;
   }
 
+  const matchedCount = skillTerms.filter((s) => containsTerm(resumeText, s.term)).length;
   const pct = total > 0 ? (hit / total) * 100 : 0;
   return {
     score: clamp(pct),
-    detail: `${skills.filter((s) => containsTerm(resumeText, s.term)).length} of ${skills.length} job skills found.`,
+    detail: `${matchedCount} of ${skillTerms.length} taxonomy skills found (synonyms count).`,
   };
 }
 
@@ -146,10 +143,9 @@ function scoreExperience(resumeText: string, jobDescription: string): { score: n
 function scoreFormat(resumeText: string): { score: number; detail: string; warnings: string[] } {
   const warnings: string[] = [];
   let score = 0;
-  const lower = normalizeText(resumeText);
   const len = resumeText.trim().length;
 
-  const sectionsFound = STANDARD_SECTIONS.filter((s) => lower.includes(s));
+  const sectionsFound = detectStandardSections(resumeText);
   score += Math.min(40, sectionsFound.length * 10);
 
   if (len < 300) {
@@ -175,8 +171,6 @@ function scoreFormat(resumeText: string): { score: number; detail: string; warni
     score += 20;
   }
 
-  const jdDegree = DEGREE_TERMS.some((d) => lower.includes(d));
-  if (jdDegree) score += 0;
   score += sectionsFound.includes('skills') ? 10 : 0;
 
   return {
@@ -204,8 +198,10 @@ function checkEducationRequirement(
 
 export function scoreResumeATS(resumeText: string, job: JobPosting): ATSScoreResult {
   const keywords = extractJobKeywords(job);
+  const skillTerms = keywords.filter((k) => k.source === 'skill');
+
   const kw = scoreKeywords(resumeText, keywords);
-  const skills = scoreSkills(resumeText, job.description);
+  const skills = scoreSkills(resumeText, skillTerms);
   const title = scoreTitleMatch(resumeText, job.title);
   const experience = scoreExperience(resumeText, job.description);
   const format = scoreFormat(resumeText);

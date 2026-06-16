@@ -1,6 +1,7 @@
 import type { JobPosting } from '../types';
 import type { WeightedTerm } from './types';
 import { DEGREE_TERMS, SKILL_TAXONOMY } from './taxonomy';
+import { getCanonicalTerm, getTermAliases } from './synonyms';
 
 const STOP_WORDS = new Set([
   'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was',
@@ -17,6 +18,22 @@ const STOP_WORDS = new Set([
   'responsible', 'responsibilities', 'requirements', 'qualifications', 'description',
   'opportunity', 'environment', 'benefits', 'offer', 'offers', 'preferred', 'required',
   'years', 'year', 'plus', 'least', 'minimum', 'strong', 'excellent', 'good',
+]);
+
+/** Generic JD fluff that repeats but isn't a skill signal. */
+const FLUFF_WORDS = new Set([
+  'experience', 'ability', 'abilities', 'knowledge', 'understanding', 'familiar',
+  'comfortable', 'passionate', 'detail', 'oriented', 'motivated', 'driven', 'dynamic',
+  'collaborative', 'growth', 'impact', 'fast', 'paced', 'environment', 'culture',
+  'solutions', 'solution', 'support', 'supporting', 'working', 'using', 'including',
+  'related', 'field', 'degree', 'equivalent', 'preferred', 'required', 'highly',
+  'high', 'level', 'senior', 'junior', 'mid', 'staff', 'lead', 'leading', 'leadership',
+  'management', 'manager', 'managing', 'develop', 'developing', 'development',
+  'deliver', 'delivering', 'delivery', 'build', 'building', 'create', 'creating',
+  'maintain', 'maintaining', 'ensure', 'ensuring', 'provide', 'providing',
+  'communicate', 'communication', 'collaborate', 'collaboration', 'partner',
+  'partnership', 'across', 'multiple', 'various', 'different', 'types', 'kind',
+  'kinds', 'well', 'both', 'either', 'neither', 'etc', 'skills',
 ]);
 
 const REQUIREMENT_MARKERS = [
@@ -40,14 +57,25 @@ export function normalizeText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-export function containsTerm(haystack: string, term: string): boolean {
-  const h = normalizeText(haystack);
+function matchSingleTerm(haystack: string, term: string): boolean {
   const t = normalizeText(term);
-  if (t.length <= 2) return false;
-  if (h.includes(t)) return true;
+  if (!t) return false;
+
   const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`\\b${escaped.replace(/\s+/g, '[\\s.-]*')}\\b`, 'i');
-  return re.test(haystack);
+  if (re.test(haystack)) return true;
+
+  // Cheap substring only for longer terms — short ones rely on word boundaries above.
+  if (t.length > 2 && normalizeText(haystack).includes(t)) return true;
+  return false;
+}
+
+/** Match a term or any known synonym alias (e.g. kubernetes ↔ k8s). */
+export function containsTerm(haystack: string, term: string): boolean {
+  for (const alias of getTermAliases(term)) {
+    if (matchSingleTerm(haystack, alias)) return true;
+  }
+  return matchSingleTerm(haystack, term);
 }
 
 function tokenize(text: string): string[] {
@@ -70,14 +98,19 @@ export function extractRequirementSection(description: string): string {
   return description.slice(bestIdx);
 }
 
+function isFluffTerm(term: string): boolean {
+  const key = normalizeText(term);
+  return STOP_WORDS.has(key) || FLUFF_WORDS.has(key);
+}
+
 export function extractJobKeywords(job: JobPosting): WeightedTerm[] {
   const weights = new Map<string, { weight: number; source: WeightedTerm['source'] }>();
   const desc = job.description;
   const reqSection = extractRequirementSection(desc);
 
   const add = (term: string, weight: number, source: WeightedTerm['source']) => {
-    const key = normalizeText(term);
-    if (key.length < 2 || STOP_WORDS.has(key)) return;
+    const key = getCanonicalTerm(term);
+    if (key.length < 2 || isFluffTerm(key)) return;
     const existing = weights.get(key);
     if (!existing || weight > existing.weight) {
       weights.set(key, { weight: (existing?.weight ?? 0) + weight, source });
@@ -86,10 +119,14 @@ export function extractJobKeywords(job: JobPosting): WeightedTerm[] {
     }
   };
 
+  const seenSkills = new Set<string>();
   for (const skill of SKILL_TAXONOMY) {
+    const canonical = getCanonicalTerm(skill);
+    if (seenSkills.has(canonical)) continue;
     if (containsTerm(desc, skill)) {
+      seenSkills.add(canonical);
       const inReq = containsTerm(reqSection, skill);
-      add(skill, inReq ? 4 : 2.5, 'skill');
+      add(canonical, inReq ? 4 : 2.5, 'skill');
     }
   }
 
@@ -106,14 +143,24 @@ export function extractJobKeywords(job: JobPosting): WeightedTerm[] {
     freq.set(word, (freq.get(word) ?? 0) + 1);
   }
   for (const [word, count] of freq) {
-    if (count >= 2 && word.length >= 4) {
+    if (count >= 2 && word.length >= 4 && !isFluffTerm(word) && !seenSkills.has(getCanonicalTerm(word))) {
       add(word, count * 0.8, 'frequency');
     }
   }
 
-  const yearMatches = desc.matchAll(/(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?([a-z][\w\s]{2,30})/gi);
+  const yearMatches = desc.matchAll(
+    /(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience\s+(?:with|in|using)\s+)?([a-z][\w+#.\-/]*(?:\s+[\w+#.\-/]+){0,2})/gi,
+  );
   for (const match of yearMatches) {
-    add(match[2].trim(), 3, 'requirement');
+    const phrase = match[2].trim();
+    for (const word of tokenize(phrase)) {
+      add(word, 3, 'requirement');
+    }
+    for (const skill of SKILL_TAXONOMY) {
+      if (containsTerm(phrase, skill)) {
+        add(getCanonicalTerm(skill), 3.5, 'requirement');
+      }
+    }
   }
 
   for (const degree of DEGREE_TERMS) {
