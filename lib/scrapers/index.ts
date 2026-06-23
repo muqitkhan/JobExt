@@ -1,13 +1,15 @@
 import { expandLinkedInDescription, isLinkedInJobPage, scrapeLinkedIn } from './linkedin';
 import type { ScrapeResult } from './types';
 import {
+  collectBestText,
   collectByClassFragment,
-  collectLongestText,
   delay,
   firstText,
+  looksLikeJobDescription,
   metaContent,
   ogContent,
   parseJsonLdJobPosting,
+  scoreDescriptionText,
   stripHtml,
   textOf,
 } from './utils';
@@ -25,6 +27,8 @@ const SECTION_KEYWORDS = [
   'about the job',
   'role overview',
 ];
+
+const MIN_CAPTURE_LENGTH = 200;
 
 export function scrapeIndeed(): ScrapeResult | null {
   const jsonLd = parseJsonLdJobPosting();
@@ -49,9 +53,10 @@ export function scrapeIndeed(): ScrapeResult | null {
     jsonLd?.location ||
     '';
   const description =
-    collectLongestText(
+    collectBestText(
       ['#jobDescriptionText', '.jobsearch-jobDescriptionText', '[id*="jobDescriptionText"]'],
-      40,
+      document,
+      80,
     ) ||
     jsonLd?.description ||
     '';
@@ -68,9 +73,10 @@ export function scrapeGlassdoor(): ScrapeResult | null {
   const location =
     firstText(['[data-test="location"]', '.JobDetails_location__']) || jsonLd?.location || '';
   const description =
-    collectLongestText(
+    collectBestText(
       ['[data-test="jobDescriptionContent"]', '.JobDetails_jobDescription__', '#JobDescriptionContainer', '.desc'],
-      40,
+      document,
+      80,
     ) ||
     jsonLd?.description ||
     '';
@@ -86,9 +92,10 @@ export function scrapeZipRecruiter(): ScrapeResult | null {
     firstText(['a.hiring_company', '[data-test="company-name"]', '.company_name']) || jsonLd?.company || '';
   const location = firstText(['.location', '[data-test="job-location"]']) || jsonLd?.location || '';
   const description =
-    collectLongestText(
+    collectBestText(
       ['.job_description', '[data-test="job-description"]', '#job_description', 'article'],
-      40,
+      document,
+      80,
     ) ||
     jsonLd?.description ||
     '';
@@ -99,12 +106,12 @@ export function scrapeZipRecruiter(): ScrapeResult | null {
 
 export function scrapeGeneric(): ScrapeResult | null {
   const jsonLd = parseJsonLdJobPosting();
-  if (jsonLd?.description && jsonLd.description.length >= 40) {
+  if (jsonLd?.description && jsonLd.description.length >= 80 && looksLikeJobDescription(jsonLd.description)) {
     return { ...jsonLd, source: 'json-ld' };
   }
 
   const selection = window.getSelection()?.toString().trim();
-  if (selection && selection.length > 100) {
+  if (selection && selection.length > 100 && looksLikeJobDescription(selection)) {
     return {
       title: document.title,
       company: '',
@@ -115,7 +122,7 @@ export function scrapeGeneric(): ScrapeResult | null {
   }
 
   const ogDesc = ogContent('og:description');
-  if (ogDesc.length > 120) {
+  if (ogDesc.length > 120 && looksLikeJobDescription(ogDesc)) {
     return {
       title: ogContent('og:title') || document.title,
       company: '',
@@ -131,7 +138,7 @@ export function scrapeGeneric(): ScrapeResult | null {
     if (SECTION_KEYWORDS.some((kw) => headingText.includes(kw))) {
       const container = heading.closest('section, article, div') ?? heading.parentElement;
       const description = textOf(container);
-      if (description.length > 200) {
+      if (description.length > 200 && looksLikeJobDescription(description)) {
         return {
           title: document.title,
           company: '',
@@ -149,9 +156,14 @@ export function scrapeGeneric(): ScrapeResult | null {
     ),
   );
   let best = '';
+  let bestScore = 0;
   for (const block of blocks) {
     const text = textOf(block);
-    if (text.length > best.length) best = text;
+    const score = scoreDescriptionText(text);
+    if (score > bestScore) {
+      bestScore = score;
+      best = text;
+    }
   }
 
   best =
@@ -160,20 +172,15 @@ export function scrapeGeneric(): ScrapeResult | null {
     collectByClassFragment('description', 120) ||
     '';
 
-  if (best.length < 200) {
-    const body = document.body.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-    if (body.length > 200) best = body.slice(0, 15000);
-  }
-
   const meta = stripHtml(metaContent('description'));
-  if (meta.length > best.length) best = meta;
+  if (scoreDescriptionText(meta) > bestScore) best = meta;
 
-  if (!best) return null;
+  if (!best || !looksLikeJobDescription(best)) return null;
   return {
     title: document.title,
     company: '',
     location: '',
-    description: best.slice(0, 15000),
+    description: best.slice(0, 15_000),
     source: 'generic',
   };
 }
@@ -187,6 +194,13 @@ export function scrapeCurrentPage(): ScrapeResult | null {
   return scrapeGeneric();
 }
 
+function isGoodCapture(result: ScrapeResult | null): boolean {
+  if (!result?.description?.trim()) return false;
+  return (
+    result.description.length >= MIN_CAPTURE_LENGTH && looksLikeJobDescription(result.description)
+  );
+}
+
 /** Expand dynamic content, retry while SPAs finish rendering, then scrape. */
 export async function scrapeCurrentPageWithRetry(): Promise<ScrapeResult | null> {
   const host = window.location.hostname;
@@ -198,7 +212,7 @@ export async function scrapeCurrentPageWithRetry(): Promise<ScrapeResult | null>
 
   for (let attempt = 0; attempt < 4; attempt++) {
     const result = scrapeCurrentPage();
-    if (result?.description && result.description.length >= 80) {
+    if (isGoodCapture(result)) {
       return result;
     }
     if (host.includes('linkedin.com')) {
@@ -208,7 +222,8 @@ export async function scrapeCurrentPageWithRetry(): Promise<ScrapeResult | null>
   }
 
   const last = scrapeCurrentPage();
-  if (last?.description || last?.title) return last;
+  if (last?.description && last.description.length >= 80) return last;
+  if (last?.title) return last;
   return null;
 }
 

@@ -1,4 +1,5 @@
 import type { LLMSettings, JobPosting, ParsedResume, TailorResult, EditMode } from '../types';
+import { scoreResumeATS } from '../ats/score';
 import {
   buildSystemPrompt,
   buildTailorPrompt,
@@ -88,12 +89,54 @@ export async function tailorResume(
   );
 }
 
-function finishTailorResult(resume: ParsedResume, changes: ResumeChange[]): TailorResult {
+function pickScoreImprovingChanges(
+  resumeText: string,
+  job: JobPosting,
+  changes: ResumeChange[],
+): ResumeChange[] {
+  if (changes.length === 0) return changes;
+
+  const baseline = scoreResumeATS(resumeText, job).overall;
+  const picked: ResumeChange[] = [];
+  let workingText = resumeText;
+
+  for (const change of changes) {
+    const candidate = buildFullTextFromChanges(workingText, [{ ...change, accepted: true }]);
+    const score = scoreResumeATS(candidate, job).overall;
+    if (score >= baseline) {
+      picked.push(change);
+      workingText = candidate;
+    }
+  }
+
+  if (picked.length > 0) return picked;
+
+  let best: ResumeChange | null = null;
+  let bestScore = baseline;
+  for (const change of changes) {
+    const candidate = buildFullTextFromChanges(resumeText, [{ ...change, accepted: true }]);
+    const score = scoreResumeATS(candidate, job).overall;
+    if (score > bestScore) {
+      bestScore = score;
+      best = change;
+    }
+  }
+
+  return best ? [best] : changes.slice(0, 1);
+}
+
+function finishTailorResult(
+  resume: ParsedResume,
+  job: JobPosting,
+  changes: ResumeChange[],
+): TailorResult {
   const filtered = changes
     .filter((c) => !isNoOpChange(c) && !isKeywordDumpChange(c))
     .map((c) => ({ ...c, accepted: true }));
 
-  let result: TailorResult = { changes: filtered, fullText: '' };
+  const improved = pickScoreImprovingChanges(resume.plainText, job, filtered);
+
+  let result: TailorResult = { changes: improved, fullText: '' };
   result = finalizeTailorResult(resume.plainText, result);
 
   if (!result.fullText || result.fullText.length < 20) {
@@ -173,7 +216,7 @@ async function tailorLocalOllama(
 
   const conn = await testOllamaConnection(settings);
   if (!conn.ok) {
-    if (fallback.length > 0) return finishTailorResult(resume, fallback);
+    if (fallback.length > 0) return finishTailorResult(resume, job, fallback);
     throw new Error(conn.message);
   }
 
@@ -196,7 +239,7 @@ async function tailorLocalOllama(
     );
   }
 
-  return finishTailorResult(resume, changes);
+  return finishTailorResult(resume, job, changes);
 }
 
 async function tailorResumeInternal(
@@ -243,13 +286,14 @@ async function tailorResumeInternal(
     result = parseTailorResponseWithRepair(raw);
   }
 
-  result.changes = result.changes
-    .filter((c) => !isNoOpChange(c) && !isKeywordDumpChange(c))
-    .slice(0, limits.maxChanges)
-    .map((c) => ({
-      ...c,
-      accepted: true,
-    }));
+  result.changes = pickScoreImprovingChanges(
+    resume.plainText,
+    job,
+    result.changes
+      .filter((c) => !isNoOpChange(c) && !isKeywordDumpChange(c))
+      .slice(0, limits.maxChanges)
+      .map((c) => ({ ...c, accepted: true })),
+  );
 
   result = finalizeTailorResult(resume.plainText, result);
 

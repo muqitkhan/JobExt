@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { ATSScoreResult } from '@/lib/ats';
 
 interface ScoreRingProps {
@@ -63,7 +62,6 @@ interface ATSScorePanelProps {
   hasTailored: boolean;
   hasResume: boolean;
   hasJob: boolean;
-  isScoring?: boolean;
 }
 
 export function ATSScorePanel({
@@ -72,10 +70,7 @@ export function ATSScorePanel({
   hasTailored,
   hasResume,
   hasJob,
-  isScoring = false,
 }: ATSScorePanelProps) {
-  const [expanded, setExpanded] = useState(false);
-
   if (!hasResume || !hasJob || !before) {
     return (
       <section className="card animate-in p-4">
@@ -84,28 +79,22 @@ export function ATSScorePanel({
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
             style={{ background: 'var(--accent-soft)' }}
           >
-            {isScoring ? (
-              <span className="spinner" />
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2">
-                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
-                <rect x="9" y="3" width="6" height="4" rx="1" />
-                <path d="M9 14l2 2 4-4" />
-              </svg>
-            )}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2">
+              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+              <rect x="9" y="3" width="6" height="4" rx="1" />
+              <path d="M9 14l2 2 4-4" />
+            </svg>
           </div>
           <div>
             <h2 className="font-display text-lg leading-tight" style={{ color: 'var(--ink)' }}>
               ATS match score
             </h2>
             <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--ink-secondary)' }}>
-              {isScoring
-                ? 'Calculating your match score…'
-                : hasResume && !hasJob
-                  ? 'Resume ready — capture or paste a job description to see your ATS score automatically.'
-                  : hasJob && !hasResume
-                    ? 'Job description added — upload your resume to score keyword match, skills, and fit.'
-                    : 'Upload your resume and add a job description. We score keyword match, skills, title fit, experience, and format — same rubric before and after tailoring.'}
+              {hasResume && !hasJob
+                ? 'Resume ready — capture or paste a job description to see your ATS score.'
+                : hasJob && !hasResume
+                  ? 'Job description added — upload your resume to score keyword match, skills, and fit.'
+                  : 'Upload your resume and add a job description. Same rubric before and after tailoring.'}
             </p>
           </div>
         </div>
@@ -117,20 +106,18 @@ export function ATSScorePanel({
   const active = after ?? before;
 
   return (
-    <section className="card overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-        style={{ background: 'var(--surface)' }}
+    <section className="card overflow-hidden" id="ats-score-panel">
+      <div
+        className="flex items-center justify-between gap-3 border-b px-4 py-3"
+        style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <ScoreRing score={active.overall} size={48} stroke={5} />
+          <ScoreRing score={active.overall} size={56} stroke={5} />
           <div className="min-w-0">
             <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
               ATS {active.overall} · {active.grade}
             </p>
-            <p className="truncate text-[11px]" style={{ color: 'var(--ink-tertiary)' }}>
+            <p className="text-[11px]" style={{ color: 'var(--ink-tertiary)' }}>
               {hasTailored && after
                 ? `Was ${before.overall} → now ${after.overall}`
                 : `${before.matchedKeywords.length} keywords matched`}
@@ -139,7 +126,7 @@ export function ATSScorePanel({
         </div>
         {hasTailored && after && (
           <span
-            className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold"
+            className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
             style={{
               background: delta >= 0 ? 'var(--accent-soft)' : 'var(--danger-soft)',
               color: delta >= 0 ? 'var(--accent)' : 'var(--danger)',
@@ -149,14 +136,18 @@ export function ATSScorePanel({
             {delta}
           </span>
         )}
-        <span className="shrink-0 text-[10px]" style={{ color: 'var(--ink-tertiary)' }}>
-          {expanded ? '▲' : '▼'}
-        </span>
-      </button>
+      </div>
 
-      {expanded && (
-        <>
-      <div className="grid grid-cols-2 gap-px border-t" style={{ background: 'var(--border)', borderColor: 'var(--border)' }}>
+      {hasTailored && after && delta < 0 && (
+        <div
+          className="border-b px-4 py-2 text-[11px] font-medium"
+          style={{ borderColor: 'var(--border)', background: 'var(--danger-soft)', color: 'var(--danger)' }}
+        >
+          Edits lowered your score — skip changes in Edits below or tap Clear session to start over.
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-px border-b" style={{ background: 'var(--border)', borderColor: 'var(--border)' }}>
         <div className="p-4" style={{ background: 'var(--surface-raised)' }}>
           <p className="label-text mb-3">Before</p>
           <div className="flex items-center gap-3">
@@ -221,11 +212,28 @@ export function ATSScorePanel({
         ))}
       </div>
 
+      {active.matchedKeywords.length > 0 && (
+        <div className="border-t px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+          <p className="label-text mb-2">Matched in resume</p>
+          <div className="flex flex-wrap gap-1.5">
+            {active.matchedKeywords.map((kw) => (
+              <span
+                key={kw}
+                className="rounded-md px-2 py-0.5 text-[11px]"
+                style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+              >
+                {kw}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {active.missingKeywords.length > 0 && (
         <div className="border-t px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-          <p className="label-text mb-2">Missing from resume</p>
+          <p className="label-text mb-2">Missing from resume ({active.missingKeywords.length})</p>
           <div className="flex flex-wrap gap-1.5">
-            {active.missingKeywords.slice(0, 10).map((kw) => (
+            {active.missingKeywords.map((kw) => (
               <span
                 key={kw}
                 className="rounded-md px-2 py-0.5 text-[11px]"
@@ -246,8 +254,6 @@ export function ATSScorePanel({
             </p>
           ))}
         </div>
-      )}
-        </>
       )}
     </section>
   );

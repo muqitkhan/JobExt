@@ -3,11 +3,20 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { scrapeLinkedIn } from '@/lib/scrapers/linkedin';
-import { parseJsonLdJobPosting, stripHtml } from '@/lib/scrapers/utils';
+import { parseJsonLdJobPosting, stripHtml, looksLikeJobDescription, scoreDescriptionText } from '@/lib/scrapers/utils';
 
 describe('scraper utils', () => {
   it('strips HTML from JSON-LD descriptions', () => {
     expect(stripHtml('<p>Hello <b>world</b></p>')).toBe('Hello world');
+  });
+
+  it('scores real job descriptions above search noise', () => {
+    const jd =
+      'Requirements: 5+ years experience with React and TypeScript. Responsibilities include building scalable APIs, mentoring engineers, and collaborating with product teams on roadmap delivery.';
+    const noise = 'Apply Apply Apply Similar jobs People also viewed Software Engineer at Acme Apply now';
+    expect(looksLikeJobDescription(jd)).toBe(true);
+    expect(looksLikeJobDescription(noise)).toBe(false);
+    expect(scoreDescriptionText(jd)).toBeGreaterThan(scoreDescriptionText(noise));
   });
 
   it('parses JobPosting JSON-LD', () => {

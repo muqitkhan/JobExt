@@ -5,8 +5,8 @@ export const LLM_LOCAL_MICRO_CHAT_MS = 28_000;
 export const LLM_TAILOR_TIMEOUT_MS = 180_000;
 export const LLM_CLOUD_CHAT_TIMEOUT_MS = 45_000;
 export const LLM_CLOUD_TAILOR_TIMEOUT_MS = 60_000;
-export const LLM_COVER_LETTER_TIMEOUT_MS = 90_000;
-export const LLM_CLOUD_COVER_TIMEOUT_MS = 45_000;
+export const LLM_COVER_LETTER_TIMEOUT_MS = 120_000;
+export const LLM_CLOUD_COVER_TIMEOUT_MS = 90_000;
 
 /** @deprecated Use specific timeout constants instead */
 export const LLM_REQUEST_TIMEOUT_MS = LLM_QUICK_TIMEOUT_MS;

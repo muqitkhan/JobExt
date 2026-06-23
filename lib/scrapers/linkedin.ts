@@ -1,7 +1,8 @@
 import type { ScrapeResult } from './types';
 import {
+  collectBestText,
   collectByClassFragment,
-  collectLongestText,
+  collectByClassFragmentIn,
   firstText,
   metaContent,
   ogContent,
@@ -10,8 +11,22 @@ import {
   textOf,
 } from './utils';
 
+/** LinkedIn job detail pane — avoids grabbing feed / similar jobs side content. */
+export function linkedInJobRoot(): Element | null {
+  return (
+    document.querySelector('.jobs-search__job-details') ??
+    document.querySelector('.jobs-details') ??
+    document.querySelector('.job-view-layout') ??
+    document.querySelector('[class*="jobs-details__main-content"]') ??
+    document.querySelector('.scaffold-layout__detail') ??
+    document.querySelector('#job-details')?.closest('div[class*="jobs"]') ??
+    null
+  );
+}
+
 /** Click LinkedIn "Show more" / "…more" controls so the full description is in the DOM. */
 export function expandLinkedInDescription(): void {
+  const root = linkedInJobRoot() ?? document;
   const buttonSelectors = [
     '.jobs-description__footer-button',
     '[data-tracking-control-name="public_jobs_show-more-html-btn"]',
@@ -22,14 +37,14 @@ export function expandLinkedInDescription(): void {
   ];
 
   for (const selector of buttonSelectors) {
-    const btn = document.querySelector<HTMLElement>(selector);
+    const btn = root.querySelector<HTMLElement>(selector);
     if (btn) {
       btn.click();
       return;
     }
   }
 
-  const containers = document.querySelectorAll(
+  const containers = root.querySelectorAll(
     '.jobs-description span, .jobs-description-content__text span, #job-details span, .show-more-less-html__markup span',
   );
   for (const span of containers) {
@@ -42,6 +57,7 @@ export function expandLinkedInDescription(): void {
 
 export function scrapeLinkedIn(): ScrapeResult | null {
   const jsonLd = parseJsonLdJobPosting();
+  const root = linkedInJobRoot() ?? document;
 
   const title =
     firstText([
@@ -76,7 +92,7 @@ export function scrapeLinkedIn(): ScrapeResult | null {
     '';
 
   const description =
-    collectLongestText(
+    collectBestText(
       [
         '.show-more-less-html__markup',
         '.jobs-description-content__text--stretch',
@@ -88,11 +104,12 @@ export function scrapeLinkedIn(): ScrapeResult | null {
         '.core-section-container__content',
         '[data-test-id="job-details-description"]',
       ],
-      40,
+      root,
+      80,
     ) ||
-    collectByClassFragment('jobs-description', 40) ||
-    collectByClassFragment('job-details', 40) ||
-    collectByClassFragment('show-more-less', 40) ||
+    collectByClassFragmentIn(root, 'jobs-description', 80) ||
+    collectByClassFragmentIn(root, 'job-details', 80) ||
+    collectByClassFragmentIn(root, 'show-more-less', 80) ||
     jsonLd?.description ||
     stripHtml(metaContent('description')) ||
     '';
@@ -118,6 +135,8 @@ export function isLinkedInJobPage(): boolean {
 }
 
 export function linkedInDescriptionLength(): number {
-  return textOf(document.querySelector('.show-more-less-html__markup, #job-details, .jobs-description__content'))
-    .length;
+  const root = linkedInJobRoot() ?? document;
+  return textOf(
+    root.querySelector('.show-more-less-html__markup, #job-details, .jobs-description__content'),
+  ).length;
 }

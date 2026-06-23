@@ -101,10 +101,10 @@ export function rephraseSpanForJob(
 
   const base = stripEndPunct(trimmed);
   if (k1 && k2) {
-    return `${base}, with demonstrated expertise in ${k1} and ${k2}.`;
+    return `${base}, with ${k1} and ${k2}.`;
   }
   if (k1) {
-    return `${base}, applying ${k1} in production environments.`;
+    return `${base}, with ${k1}.`;
   }
 
   return null;

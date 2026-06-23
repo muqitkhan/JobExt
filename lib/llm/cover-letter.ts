@@ -29,12 +29,15 @@ Job: ${jobExcerpt}
 Resume: ${resumeExcerpt}
 Return only the letter body.`;
 
+  const chat = chatLLM(settings, system, user, { jsonMode: false, maxTokens: cloud ? 700 : 900 });
+
+  // Local Ollama: no outer timeout — let the model finish; cloud keeps a generous cap.
+  if (settings.provider === 'ollama') {
+    const raw = await chat;
+    return raw.trim();
+  }
+
   const timeout = cloud ? LLM_CLOUD_COVER_TIMEOUT_MS : LLM_COVER_LETTER_TIMEOUT_MS;
-  const raw = await withTimeout(
-    chatLLM(settings, system, user, { jsonMode: false }),
-    timeout,
-    undefined,
-    'cover',
-  );
+  const raw = await withTimeout(chat, timeout, undefined, 'cover');
   return raw.trim();
 }

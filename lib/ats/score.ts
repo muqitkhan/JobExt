@@ -57,7 +57,7 @@ function scoreKeywords(
   return {
     score: clamp(rate),
     matched,
-    missing: missing.slice(0, 12),
+    missing: missing,
     detail: `${matched.length} of ${keywords.length} weighted terms found in resume.`,
   };
 }
@@ -258,7 +258,7 @@ export function scoreResumeATS(resumeText: string, job: JobPosting): ATSScoreRes
     overall,
     grade: gradeFromScore(overall),
     categories,
-    matchedKeywords: kw.matched.slice(0, 15),
+    matchedKeywords: kw.matched,
     missingKeywords: kw.missing,
     warnings,
     keywordMatchRate: kw.score,

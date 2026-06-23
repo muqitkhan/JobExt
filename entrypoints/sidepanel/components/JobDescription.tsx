@@ -49,7 +49,7 @@ export function JobDescription({
           className="mb-3 rounded-lg px-3 py-2 text-xs font-medium"
           style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
         >
-          Job description captured — ATS score updated below.
+          Job description captured — ATS score updated above.
         </p>
       )}
 

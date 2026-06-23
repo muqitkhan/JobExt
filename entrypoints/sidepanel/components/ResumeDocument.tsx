@@ -10,8 +10,36 @@ interface ResumeDocumentProps {
   showRejected: boolean;
 }
 
-function sectionChanges(sectionBody: string, changes: ResumeChange[]): ResumeChange[] {
-  return changes.filter((c) => c.original.trim() && findOriginalSpan(sectionBody, c.original));
+function changesForSection(
+  sectionBody: string,
+  fullText: string,
+  changes: ResumeChange[],
+): ResumeChange[] {
+  const resolved: ResumeChange[] = [];
+
+  for (const change of changes) {
+    if (!change.original.trim()) continue;
+
+    if (findOriginalSpan(sectionBody, change.original)) {
+      resolved.push(change);
+      continue;
+    }
+
+    const span = findOriginalSpan(fullText, change.original);
+    if (!span) continue;
+
+    const excerpt = fullText.slice(span.start, span.end);
+    if (findOriginalSpan(sectionBody, excerpt)) {
+      resolved.push({ ...change, original: excerpt });
+      continue;
+    }
+
+    if (sectionBody.includes(change.original.trim())) {
+      resolved.push(change);
+    }
+  }
+
+  return resolved;
 }
 
 function SectionBody({
@@ -19,17 +47,23 @@ function SectionBody({
   changes,
   showHighlights,
   showRejected,
+  fullText,
 }: {
   body: string;
   changes: ResumeChange[];
   showHighlights: boolean;
   showRejected: boolean;
+  fullText: string;
 }) {
   if (!showHighlights || changes.length === 0) {
     return <p className="resume-section-body whitespace-pre-wrap">{body}</p>;
   }
 
-  const { parts } = buildDisplayText(body, changes, showRejected);
+  const fullRewrite = changes.length === 1 && changes[0].id === 'full';
+  const source = fullRewrite ? fullText : body;
+  const sectionChanges = fullRewrite ? changes : changes;
+
+  const { parts } = buildDisplayText(source, sectionChanges, showRejected);
 
   return (
     <p className="resume-section-body whitespace-pre-wrap">
@@ -52,6 +86,26 @@ export function ResumeDocument({
   showRejected,
 }: ResumeDocumentProps) {
   const layout = parseResumeLayout(resume);
+  const fullText = resume.plainText;
+  const isFullRewrite = changes.length === 1 && changes[0].id === 'full';
+
+  if (isFullRewrite && showHighlights) {
+    const { parts } = buildDisplayText(fullText, changes, showRejected);
+    return (
+      <article className="resume-preview">
+        <p className="resume-section-body whitespace-pre-wrap">
+          {parts.map((part: DiffPart, i: number) => (
+            <span
+              key={i}
+              className={part.added ? 'diff-added' : part.removed ? 'diff-removed' : undefined}
+            >
+              {part.value}
+            </span>
+          ))}
+        </p>
+      </article>
+    );
+  }
 
   return (
     <article className="resume-preview">
@@ -60,7 +114,7 @@ export function ResumeDocument({
 
       {layout.sections.map((section, idx) => {
         const title = section.title.trim();
-        const sectionEdits = showHighlights ? sectionChanges(section.body, changes) : [];
+        const sectionEdits = showHighlights ? changesForSection(section.body, fullText, changes) : [];
 
         return (
           <section key={`${title}-${idx}`} className="resume-section">
@@ -70,6 +124,7 @@ export function ResumeDocument({
               changes={sectionEdits}
               showHighlights={showHighlights}
               showRejected={showRejected}
+              fullText={fullText}
             />
           </section>
         );

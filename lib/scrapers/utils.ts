@@ -28,6 +28,103 @@ export function collectLongestText(selectors: string[], minLength = 0): string {
   return best.length >= minLength ? best : '';
 }
 
+const JOB_SIGNAL_WORDS = [
+  'responsibilities',
+  'requirements',
+  'qualifications',
+  'experience',
+  'skills',
+  'description',
+  'benefits',
+  'about the role',
+  'what you',
+];
+
+const SEARCH_RESULT_NOISE = [
+  /\bsimilar jobs\b/i,
+  /\bpeople also viewed\b/i,
+  /\brecommended for you\b/i,
+  /\b\d+\s+results\b/i,
+  /\bsearch results\b/i,
+];
+
+/** Heuristic: real JD text vs search chrome / side panels. */
+export function looksLikeJobDescription(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 120) return false;
+
+  const lower = trimmed.toLowerCase();
+  if (SEARCH_RESULT_NOISE.some((re) => re.test(lower))) return false;
+
+  const applyCount = (trimmed.match(/\bapply\b/gi) ?? []).length;
+  if (applyCount >= 4 && trimmed.length < 2500) return false;
+
+  const signals = JOB_SIGNAL_WORDS.filter((w) => lower.includes(w)).length;
+  if (signals >= 1) return true;
+
+  return trimmed.length >= 350;
+}
+
+export function scoreDescriptionText(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed.length < 40) return 0;
+
+  let score = Math.min(trimmed.length, 10_000);
+  if (looksLikeJobDescription(trimmed)) score += 800;
+
+  for (const re of SEARCH_RESULT_NOISE) {
+    if (re.test(trimmed)) score -= 600;
+  }
+
+  const applyCount = (trimmed.match(/\bapply\b/gi) ?? []).length;
+  if (applyCount >= 3) score -= applyCount * 120;
+
+  return score;
+}
+
+/** Pick best-scoring candidate instead of blindly taking the longest block. */
+export function collectBestText(
+  selectors: string[],
+  root: ParentNode = document,
+  minLength = 40,
+): string {
+  let best = '';
+  let bestScore = 0;
+
+  for (const selector of selectors) {
+    root.querySelectorAll(selector).forEach((el) => {
+      const value = textOf(el);
+      if (value.length < minLength) return;
+      const score = scoreDescriptionText(value);
+      if (score > bestScore) {
+        bestScore = score;
+        best = value;
+      }
+    });
+  }
+
+  return best;
+}
+
+export function collectByClassFragmentIn(
+  root: ParentNode,
+  fragment: string,
+  minLength = 80,
+): string {
+  let best = '';
+  let bestScore = 0;
+  root.querySelectorAll(`[class*="${fragment}"]`).forEach((el) => {
+    const value = textOf(el);
+    if (value.length < minLength) return;
+    const score = scoreDescriptionText(value);
+    if (score > bestScore) {
+      bestScore = score;
+      best = value;
+    }
+  });
+  return best;
+}
+
 export function collectByClassFragment(fragment: string, minLength = 80): string {
   let best = '';
   document.querySelectorAll(`[class*="${fragment}"]`).forEach((el) => {

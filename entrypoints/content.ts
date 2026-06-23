@@ -15,11 +15,20 @@ export default defineContentScript({
             });
             return;
           }
+          const description = result.description?.trim() ?? '';
+          if (description.length < 80 && !result.title?.trim()) {
+            sendResponse({
+              type: 'JOB_CAPTURE_ERROR',
+              error:
+                'Only a short snippet was found. Open the full job posting and click Show more, or paste the description manually.',
+            });
+            return;
+          }
           sendResponse({
             type: 'JOB_CAPTURED',
             job: {
               ...result,
-              description: result.description || result.title,
+              description: description || result.title || '',
               url: window.location.href,
             },
           });

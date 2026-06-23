@@ -3,7 +3,6 @@ import type { JobPosting, ParsedResume, ResumeChange } from '@/lib/types';
 import { scoreResumeATS, type ATSScoreResult } from '@/lib/ats';
 import { captureJobFromActiveTab } from '@/lib/scrapers';
 import { getLLMSettings, isSetupComplete } from '@/lib/storage/settings';
-import { isCloudProvider } from '@/lib/llm/cloud-providers';
 import { getFinalText } from '@/lib/diff/highlight';
 import { buildFullTextFromChanges } from '@/lib/llm/prompts';
 import { tailorResume, warmOllamaModel } from '@/lib/llm';
@@ -16,7 +15,7 @@ import { ResumeUpload } from './components/ResumeUpload';
 import { ResumePanel } from './components/ResumePanel';
 import { JobDescription } from './components/JobDescription';
 import { ChangeReview } from './components/ChangeReview';
-import { ATSScorePanel } from './components/ATSScorePanel';
+import { ATSScorePanel, ScoreRing } from './components/ATSScorePanel';
 import { LLMSettingsPanel } from './components/LLMSettings';
 import { CoverLetterPanel } from './components/CoverLetterPanel';
 import { DismissibleAlert } from './components/DismissibleAlert';
@@ -36,6 +35,9 @@ export default function App() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [includeCoverLetter, setIncludeCoverLetter] = useState(false);
   const [coverLetter, setCoverLetter] = useState<string | null>(null);
+  const [coverLetterError, setCoverLetterError] = useState<string | null>(null);
+
+  const displayScore = tailoredScore ?? baselineScore;
 
   const hasResume = Boolean(resume?.plainText?.trim());
   const hasJob = Boolean(job?.description?.trim());
@@ -79,6 +81,10 @@ export default function App() {
     setIsCapturing(true);
     setError(null);
     setSuccessMessage(null);
+    setChanges([]);
+    setHasTailored(false);
+    setCoverLetter(null);
+    setCoverLetterError(null);
     try {
       const result = await captureJobFromActiveTab();
       if (result.job) {
@@ -98,6 +104,40 @@ export default function App() {
     }
   }, []);
 
+  const handleClearSession = useCallback(() => {
+    setJob(null);
+    setChanges([]);
+    setHasTailored(false);
+    setCoverLetter(null);
+    setCoverLetterError(null);
+    setError(null);
+    setSuccessMessage(null);
+    setIncludeCoverLetter(false);
+  }, []);
+
+  const handleRetryCoverLetter = useCallback(async () => {
+    if (!job?.description?.trim() || !resume) return;
+    setIsTailoring(true);
+    setCoverLetterError(null);
+    setTailorStatus('Writing cover letter…');
+    try {
+      const settings = await getLLMSettings();
+      const letterResumeText = hasTailored
+        ? buildFullTextFromChanges(resume.plainText, changes)
+        : resume.plainText;
+      const letter = await generateCoverLetter(job, settings, letterResumeText);
+      setCoverLetter(letter);
+      setSuccessMessage('Cover letter ready.');
+    } catch (err) {
+      setCoverLetterError(
+        err instanceof Error ? err.message : 'Cover letter failed. Try again or skip it.',
+      );
+    } finally {
+      setIsTailoring(false);
+      setTailorStatus(null);
+    }
+  }, [job, resume, hasTailored, changes]);
+
   const handleTailor = useCallback(async () => {
     if (!job?.description?.trim()) {
       setError('Add a job description before tailoring.');
@@ -111,16 +151,12 @@ export default function App() {
     setIsTailoring(true);
     setError(null);
     setSuccessMessage(null);
-    setTailorStatus('Connecting to AI…');
+    setTailorStatus('Tailoring resume…');
     setCoverLetter(null);
+    setCoverLetterError(null);
 
     try {
       const settings = await getLLMSettings();
-      setTailorStatus(
-        isCloudProvider(settings.provider)
-          ? 'Tailoring with cloud AI — usually 5–20s…'
-          : 'Local AI (18s max) — then keyword match if needed…',
-      );
 
       const result = await tailorResume(job, resume, settings, 'review');
       setChanges(result.changes);
@@ -131,17 +167,39 @@ export default function App() {
           ? result.fullText
           : getFinalText(resume.plainText, result.changes);
 
+      let letterReady = false;
       if (includeCoverLetter || coverLetterRequired) {
         setTailorStatus('Writing cover letter…');
-        const letter = await generateCoverLetter(job, settings, letterResumeText);
-        setCoverLetter(letter);
+        try {
+          const letter = await generateCoverLetter(job, settings, letterResumeText);
+          setCoverLetter(letter);
+          letterReady = true;
+        } catch (err) {
+          setCoverLetterError(
+            err instanceof Error ? err.message : 'Cover letter failed. Retry below or skip it.',
+          );
+        }
       }
 
-      setSuccessMessage(
-        includeCoverLetter || coverLetterRequired
-          ? 'Resume tailored and cover letter ready.'
-          : 'Resume tailored — review edits below, then download.',
-      );
+      const tailoredText = buildFullTextFromChanges(resume.plainText, result.changes);
+      const afterScore = scoreResumeATS(tailoredText, job);
+      const beforeScore = scoreResumeATS(resume.plainText, job).overall;
+
+      if (afterScore.overall < beforeScore) {
+        setSuccessMessage(
+          letterReady
+            ? 'Resume tailored — score dropped; review edits or clear session.'
+            : 'Resume tailored — score dropped; review edits or clear session.',
+        );
+      } else if (includeCoverLetter || coverLetterRequired) {
+        setSuccessMessage(
+          letterReady
+            ? 'Resume tailored and cover letter ready.'
+            : 'Resume tailored. Cover letter failed — use Retry below.',
+        );
+      } else {
+        setSuccessMessage('Resume tailored — review edits below, then download.');
+      }
     } catch (err) {
       if (err instanceof OllamaOriginBlockedError) {
         setError(err.message);
@@ -196,39 +254,58 @@ export default function App() {
           backdropFilter: 'blur(10px)',
         }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2.5">
             <img
               src="/icon/48.png"
               alt=""
               width={32}
               height={32}
-              className="h-8 w-8 rounded-lg shadow-sm"
+              className="h-8 w-8 shrink-0 rounded-lg shadow-sm"
             />
-            <div>
+            <div className="min-w-0">
               <h1 className="font-display text-lg leading-none" style={{ color: 'var(--ink)' }}>
                 JobExt
               </h1>
-              <p className="text-[10px]" style={{ color: 'var(--ink-tertiary)' }}>
-                Resume · match · export
+              <p className="truncate text-[10px]" style={{ color: 'var(--ink-tertiary)' }}>
+                {displayScore
+                  ? `ATS ${displayScore.overall} · ${displayScore.grade}`
+                  : 'Resume · match · export'}
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setIsFirstRunSetup(false);
-              setShowSettings(true);
-            }}
-            className="btn-secondary !p-2"
-            title="AI settings"
-            aria-label="Settings"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-            </svg>
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {displayScore && (
+              <div className="hidden sm:block" title="Current ATS score">
+                <ScoreRing score={displayScore.overall} size={36} stroke={4} />
+              </div>
+            )}
+            {(hasJob || hasTailored) && (
+              <button
+                type="button"
+                onClick={handleClearSession}
+                className="btn-secondary !px-2 !py-1.5 !text-[11px]"
+                title="Clear job and tailoring for a new role"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setIsFirstRunSetup(false);
+                setShowSettings(true);
+              }}
+              className="btn-secondary !p-2"
+              title="AI settings"
+              aria-label="Settings"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -261,7 +338,6 @@ export default function App() {
           hasTailored={hasTailored}
           hasResume={hasResume}
           hasJob={hasJob}
-          isScoring={isCapturing && hasResume}
         />
 
         {!resume ? (
@@ -379,6 +455,22 @@ export default function App() {
                 onDownload={handleDownloadCoverLetter}
                 isRequired={coverLetterRequired}
               />
+            )}
+
+            {coverLetterError && !coverLetter && (
+              <section className="card animate-in p-4">
+                <p className="mb-2 text-sm" style={{ color: 'var(--danger)' }}>
+                  {coverLetterError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleRetryCoverLetter()}
+                  disabled={isTailoring}
+                  className="btn-secondary w-full !py-2 text-sm"
+                >
+                  Retry cover letter
+                </button>
+              </section>
             )}
           </>
         )}
