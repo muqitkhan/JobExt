@@ -1,6 +1,7 @@
 import type { ParsedResume } from '../types';
 import { splitIntoSections } from '../parsers/sections';
 import { getLocalMicroLimits } from './models';
+import { TAILOR_WRITING_RULES, formatMissingKeywordsBlock } from './tailor-guidance';
 
 export interface EditableSpan {
   id: string;
@@ -128,9 +129,13 @@ export function buildCompressedTailorPrompt(
   jobDescription: string,
   digest: string,
   maxChanges: number,
+  missingKeywords: string[] = [],
 ): string {
+  const missing = formatMissingKeywordsBlock(missingKeywords.slice(0, 10));
   return `Rephrase resume lines for this job. Max ${maxChanges} edits.
-Rules: copy "original" exactly from a PHRASE below; "revised" must be a natural human rewrite (same facts, better role fit) — not a keyword list or comma-appended terms; no invented facts; JSON only.
+Rules: copy "original" exactly from a PHRASE below; "revised" must be a natural X–Y–Z accomplishment rewrite (same facts, better role fit) — not a keyword list or comma-appended terms; no invented facts; JSON only.
+${TAILOR_WRITING_RULES}
+Missing keywords (weave with business context): ${missing}
 
 JOB: ${jobTitle}
 DESCRIPTION:

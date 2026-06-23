@@ -47,13 +47,14 @@ describe('extractMicroSpans', () => {
 });
 
 describe('rephraseSpanForJob', () => {
-  it('weaves job terms into sentence structure instead of appending lists', () => {
+  it('weaves job terms into X–Y–Z structure instead of appending lists', () => {
     const original =
       'Full Stack and AI Engineer with 4+ years of experience building web applications using JavaScript';
-    const revised = rephraseSpanForJob(original, ['TypeScript', 'React'], job.title);
+    const revised = rephraseSpanForJob(original, ['TypeScript', 'React'], job.title, 'PROFESSIONAL SUMMARY');
     expect(revised).toBeTruthy();
     expect(revised).not.toMatch(/, TypeScript, React/);
     expect(revised!.toLowerCase()).toMatch(/typescript|react/);
+    expect(revised).toMatch(/by applying|by implementing|measured by/i);
     expect(
       isKeywordDumpChange({
         id: '1',

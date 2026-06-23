@@ -64,8 +64,13 @@ describe('tailorResume', () => {
     const result = await tailorResume(job, resume, settings, 'quick');
     expect(result.changes.length).toBeGreaterThanOrEqual(1);
     expect(result.fullText.length).toBeGreaterThan(20);
-    expect(result.changes.some((c) => c.reason.includes('Rephrased') || c.reason.includes('Aligned'))).toBe(
-      true,
-    );
+    expect(
+      result.changes.some(
+        (c) =>
+          c.reason.includes('Rephrased') ||
+          c.reason.includes('Aligned') ||
+          c.reason.includes('X–Y–Z'),
+      ),
+    ).toBe(true);
   });
 });

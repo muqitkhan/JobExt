@@ -1,5 +1,10 @@
 import type { JobPosting, ResumeChange, TailorResult } from '../types';
 import { getProfileLimits } from './models';
+import {
+  TAILOR_WRITING_RULES,
+  formatMissingKeywordsBlock,
+  getMissingKeywords,
+} from './tailor-guidance';
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -43,9 +48,13 @@ export function buildTailorPrompt(
 ): string {
   const limits = getProfileLimits(profile);
 
+  const missingBlock = formatMissingKeywordsBlock(getMissingKeywords(job, resumeText, 10));
+
   if (profile === 'fast') {
     return `Match this resume to the job with at most ${limits.maxChanges} tiny phrase swaps.
 Rules: copy "original" exactly from RESUME; "revised" must use different words; same layout/tone; no invented facts; JSON only.
+${TAILOR_WRITING_RULES}
+Missing keywords (weave with what/how/business result — not bare lists): ${missingBlock}
 
 JOB: ${job.title}
 DESCRIPTION:
@@ -77,6 +86,8 @@ Rules:
 - Make surgical edits only. "original" must be copied verbatim from RESUME.
 - Sound like the candidate wrote it — no buzzword stuffing or corporate filler.
 - Never invent experience or credentials.
+- ${TAILOR_WRITING_RULES}
+- Missing keywords to address with business context (not comma-separated skill dumps): ${missingBlock}
 - Return ONLY valid JSON, no markdown fences.
 
 JOB: ${job.title}${job.company ? ` @ ${job.company}` : ''}
@@ -93,9 +104,9 @@ ${outputShape}`;
 
 export function buildSystemPrompt(profile: 'fast' | 'quality'): string {
   if (profile === 'fast') {
-    return 'JobExt. Valid JSON only. Max 3 phrase edits. revised must differ from original. Omit fullText.';
+    return `JobExt. Valid JSON only. Max 3 phrase edits. revised must differ from original. Omit fullText. ${TAILOR_WRITING_RULES}`;
   }
-  return `You are JobExt. Valid JSON only. Small human-sounding phrase edits. Preserve resume layout and line breaks.`;
+  return `You are JobExt. Valid JSON only. Small human-sounding phrase edits. Preserve resume layout and line breaks. ${TAILOR_WRITING_RULES}`;
 }
 
 /** Try to salvage JSON from a messy model response without a second LLM call. */

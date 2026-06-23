@@ -2,6 +2,7 @@ import type { JobPosting, ParsedResume, ResumeChange } from '../types';
 import { extractJobKeywords, containsTerm } from '../ats/keywords';
 import { extractEditableSpans } from './compress';
 import { extractTopJobTerms } from './micro';
+import { buildXyzBullet } from './tailor-guidance';
 
 function stripEndPunct(text: string): string {
   return text.trim().replace(/[.,;]+$/, '');
@@ -29,100 +30,57 @@ function keywordsForSpan(spanText: string, job: JobPosting): string[] {
     if (containsTerm(spanText, term)) continue;
     seen.add(key);
     out.push(term);
-    if (out.length >= 4) break;
+    if (out.length >= 6) break;
   }
 
   return out;
 }
 
 /**
- * Sentence-level rephrase templates — used only when the local LLM call fails.
- * Integrates job terms into natural phrasing instead of appending keyword lists.
+ * X–Y–Z rephrase for template fallback — weaves missing keywords with business context.
  */
 export function rephraseSpanForJob(
   text: string,
   keywords: string[],
   jobTitle: string,
+  section = '',
 ): string | null {
   const trimmed = text.trim();
   if (!trimmed || keywords.length === 0) return null;
 
+  const xyz = buildXyzBullet(trimmed, keywords, { jobTitle, section });
+  if (xyz !== trimmed && xyz.length >= 20) return xyz;
+
   const k1 = keywords[0];
-  const k2 = keywords[1];
-  const roleWord = titleTerms({ title: jobTitle } as JobPosting)[0] ?? k1;
-
-  const yearsMatch = trimmed.match(
-    /(\d+\+?\s*years?)(?:\s+of)?\s+(experience|expertise)?/i,
-  );
-  if (yearsMatch && k1 && !containsTerm(trimmed, k1)) {
-    const replacement = yearsMatch[2]
-      ? `${yearsMatch[1]} of ${k1} ${yearsMatch[2]}`
-      : `${yearsMatch[1]} of ${k1} experience`;
-    return trimmed.replace(yearsMatch[0], replacement);
-  }
-
-  const usingMatch = trimmed.match(/\busing\s+([^,.;]+)/i);
-  if (usingMatch && k1 && !containsTerm(usingMatch[1], k1)) {
-    return trimmed.replace(usingMatch[0], `using ${k1} and ${usingMatch[1].trim()}`);
-  }
-
   const verbMatch = trimmed.match(/\b(built|developed|designed|delivered|led)\s+([^,.;]+)/i);
   if (verbMatch && k1 && !containsTerm(verbMatch[2], k1)) {
-    return trimmed.replace(
-      verbMatch[0],
-      `${verbMatch[1]} ${verbMatch[2].trim()} with ${k1}`,
-    );
-  }
-
-  const engineerMatch = trimmed.match(
-    /^(.*?)\b(engineer|developer|architect)\b(.*)$/i,
-  );
-  if (engineerMatch && roleWord && !containsTerm(trimmed, roleWord)) {
-    const focus = roleWord.charAt(0).toUpperCase() + roleWord.slice(1);
-    return trimmed.replace(
-      engineerMatch[2],
-      `${focus}-focused ${engineerMatch[2].toLowerCase()}`,
-    );
-  }
-
-  const colonIdx = trimmed.indexOf(':');
-  if (colonIdx > 0 && colonIdx < 40) {
-    const head = trimmed.slice(0, colonIdx + 1);
-    const rest = trimmed.slice(colonIdx + 1).trim();
-    const toAdd = keywords.filter((k) => !containsTerm(rest, k)).slice(0, 2);
-    if (toAdd.length > 0) {
-      if (rest) {
-        const joiner = toAdd.length === 1 ? toAdd[0] : `${toAdd[0]} and ${toAdd[1]}`;
-        return `${head} ${rest}, including ${joiner}`;
-      }
-      return `${head} ${toAdd.join(', ')}`;
-    }
+    return buildXyzBullet(trimmed, keywords, { jobTitle, section });
   }
 
   const base = stripEndPunct(trimmed);
-  if (k1 && k2) {
-    return `${base}, with ${k1} and ${k2}.`;
-  }
   if (k1) {
-    return `${base}, with ${k1}.`;
+    return buildXyzBullet(base, keywords, { jobTitle, section });
   }
 
   return null;
 }
 
-function applyRephrase(text: string, keywords: string[], jobTitle: string): string | null {
-  const revised = rephraseSpanForJob(text, keywords, jobTitle);
+function applyRephrase(
+  text: string,
+  keywords: string[],
+  jobTitle: string,
+  section: string,
+): string | null {
+  const revised = rephraseSpanForJob(text, keywords, jobTitle, section);
   if (!revised) return null;
   if (revised.trim().toLowerCase() === text.trim().toLowerCase()) return null;
   if (revised.length > 320) return revised.slice(0, 320);
   return revised;
 }
 
-/**
- * Rule-based edits — instant, no LLM. Rephrases phrases for role fit, not keyword dumps.
- */
+/** Rule-based X–Y–Z edits — instant, no LLM. */
 export function buildInstantEdits(resume: ParsedResume, job: JobPosting): ResumeChange[] {
-  const spans = extractEditableSpans(resume, 6);
+  const spans = extractEditableSpans(resume, 8);
   const changes: ResumeChange[] = [];
   let n = 1;
 
@@ -130,7 +88,7 @@ export function buildInstantEdits(resume: ParsedResume, job: JobPosting): Resume
     const keywords = keywordsForSpan(span.text, job);
     if (keywords.length === 0) continue;
 
-    const revised = applyRephrase(span.text, keywords, job.title);
+    const revised = applyRephrase(span.text, keywords, job.title, span.section);
     if (!revised) continue;
 
     changes.push({
@@ -138,28 +96,28 @@ export function buildInstantEdits(resume: ParsedResume, job: JobPosting): Resume
       section: span.section,
       original: span.text,
       revised,
-      reason: 'Rephrased for role fit',
+      reason: `X–Y–Z rewrite with ${keywords.slice(0, 3).join(', ')}`,
       accepted: true,
     });
 
-    if (changes.length >= 2) break;
+    if (changes.length >= 6) break;
   }
 
   return changes;
 }
 
-/** Always produces at least one edit when job + resume exist. */
+/** Always produces at least one X–Y–Z edit when job + resume exist. */
 export function buildGuaranteedEdits(resume: ParsedResume, job: JobPosting): ResumeChange[] {
   const instant = buildInstantEdits(resume, job);
   if (instant.length > 0) return instant;
 
   const spans = extractEditableSpans(resume, 3);
-  const keywords = extractTopJobTerms(job, 5);
+  const keywords = extractTopJobTerms(job, 6);
   const span = spans[0];
   if (!span) return [];
 
   if (keywords.length > 0) {
-    const revised = applyRephrase(span.text, keywords, job.title);
+    const revised = applyRephrase(span.text, keywords, job.title, span.section);
     if (revised) {
       return [
         {
@@ -167,7 +125,7 @@ export function buildGuaranteedEdits(resume: ParsedResume, job: JobPosting): Res
           section: span.section,
           original: span.text,
           revised,
-          reason: 'Aligned phrasing with job posting',
+          reason: `X–Y–Z alignment: ${keywords.slice(0, 3).join(', ')}`,
           accepted: true,
         },
       ];
@@ -175,20 +133,23 @@ export function buildGuaranteedEdits(resume: ParsedResume, job: JobPosting): Res
   }
 
   const title = job.title.trim();
-  if (title.length > 2 && !containsTerm(span.text, title)) {
-    const base = stripEndPunct(span.text);
-    const rolePhrase = title.replace(/\b(engineer|developer|manager)\b/i, '').trim() || title;
-    const revised = `${base} targeting ${rolePhrase} opportunities.`;
-    return [
-      {
-        id: 'g1',
-        section: span.section,
-        original: span.text,
-        revised: revised.slice(0, 320),
-        reason: 'Referenced target role',
-        accepted: true,
-      },
-    ];
+  if (title.length > 2) {
+    const revised = buildXyzBullet(span.text, keywords.length > 0 ? keywords : [title], {
+      jobTitle: title,
+      section: span.section,
+    });
+    if (revised !== span.text) {
+      return [
+        {
+          id: 'g1',
+          section: span.section,
+          original: span.text,
+          revised: revised.slice(0, 320),
+          reason: 'X–Y–Z role alignment',
+          accepted: true,
+        },
+      ];
+    }
   }
 
   return [];

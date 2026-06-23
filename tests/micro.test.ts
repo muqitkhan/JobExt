@@ -23,7 +23,7 @@ describe('buildSingleSpanPrompt', () => {
       section: 'Summary',
       text: 'Built apps using JavaScript',
     });
-    expect(prompt).toMatch(/not a keyword list/i);
+    expect(prompt).toMatch(/X–Y–Z|comma-separated lists/i);
     expect(prompt).toMatch(/React Developer/);
   });
 });

@@ -1,9 +1,11 @@
 import type { JobPosting } from '../types';
 import { extractJobKeywords } from '../ats/keywords';
 import type { EditableSpan } from './compress';
+import { TAILOR_WRITING_RULES, formatMissingKeywordsBlock } from './tailor-guidance';
 
-const MICRO_SYSTEM_PROMPT =
-  'You rewrite resume lines for job fit. Same facts only. Natural professional wording — never comma-separated keyword lists. JSON only.';
+const MICRO_SYSTEM_PROMPT = `You rewrite resume lines for job fit. Same facts only — never invent employers, dates, or metrics.
+${TAILOR_WRITING_RULES}
+JSON only.`;
 
 /** Top job terms for micro prompts — keeps local LLM input tiny. */
 export function extractTopJobTerms(job: JobPosting, max = 8): string[] {
@@ -34,18 +36,21 @@ export function buildSingleSpanPrompt(
   jobTitle: string,
   keywords: string[],
   span: EditableSpan,
+  missingKeywords: string[] = keywords,
 ): string {
   const themes = keywords.slice(0, 6).join(', ');
+  const missing = formatMissingKeywordsBlock(missingKeywords.slice(0, 8));
   const phrase = span.text.length > 180 ? `${span.text.slice(0, 177)}…` : span.text;
-  return `Rephrase this resume line for a "${jobTitle}" role.
+  return `Rephrase this resume line for a "${jobTitle}" role using X–Y–Z accomplishment format.
 
 Rules:
+- X: strong action verb + project/outcome; Y: quantifiable evidence from the ORIGINAL only; Z: actions, tech, methods
 - Keep the same facts (years, tools, scope) — do not invent employers or credentials
-- Write one natural professional sentence or phrase — NOT a keyword list
-- Weave relevant themes into the wording; never append ", term1, term2" or "with X and Y" to the end
+- Weave missing keywords in the Z clause with business context — NOT comma-separated lists or "with X and Y" appends
 - The revised line must read as if a human editor rewrote it
 
-Themes to reflect naturally: ${themes}
+Themes to reflect: ${themes}
+Missing keywords (require what/how/business result): ${missing}
 
 Original:
 ${phrase}
@@ -53,17 +58,24 @@ ${phrase}
 Return JSON only: {"r":"rephrased line"}`;
 }
 
-export function buildMicroBatchPrompt(jobTitle: string, keywords: string[], digest: string): string {
+export function buildMicroBatchPrompt(
+  jobTitle: string,
+  keywords: string[],
+  digest: string,
+  missingKeywords: string[] = keywords,
+): string {
   const themes = keywords.slice(0, 6).join(', ');
-  return `Rephrase up to 2 resume lines for a "${jobTitle}" role.
+  const missing = formatMissingKeywordsBlock(missingKeywords.slice(0, 8));
+  return `Rephrase up to 2 resume lines for a "${jobTitle}" role using X–Y–Z format.
 
-Rules: same facts only; natural sentences — not keyword lists; copy originals exactly from below.
+Rules: same facts only; X–Y–Z accomplishments; weave missing keywords with business context — not keyword lists; copy originals exactly from below.
 
 Themes: ${themes}
+Missing keywords: ${missing}
 
 ${digest}
 
-{"changes":[{"id":"c1","original":"from above","revised":"human-sounding rewrite","reason":"brief"}]}`;
+{"changes":[{"id":"c1","original":"from above","revised":"human-sounding X–Y–Z rewrite","reason":"brief"}]}`;
 }
 
 export { MICRO_SYSTEM_PROMPT };

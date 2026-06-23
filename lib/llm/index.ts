@@ -1,5 +1,4 @@
 import type { LLMSettings, JobPosting, ParsedResume, TailorResult, EditMode } from '../types';
-import { scoreResumeATS } from '../ats/score';
 import {
   buildSystemPrompt,
   buildTailorPrompt,
@@ -30,12 +29,14 @@ import { chatLLM, usesJsonMode } from './chat';
 import { isCloudProvider } from './cloud-providers';
 import { extractEditableSpans } from './compress';
 import { buildInstantEdits, buildGuaranteedEdits } from './instant-tailor';
+import { augmentChangesToTargetScore } from './score-tailor';
 import {
   extractTopJobTerms,
   buildSingleSpanPrompt,
   parseMicroRevision,
   MICRO_SYSTEM_PROMPT,
 } from './micro';
+import { getMissingKeywords } from './tailor-guidance';
 import type { ResumeChange } from '../types';
 
 export { LLMTimeoutError } from './timeout';
@@ -89,42 +90,6 @@ export async function tailorResume(
   );
 }
 
-function pickScoreImprovingChanges(
-  resumeText: string,
-  job: JobPosting,
-  changes: ResumeChange[],
-): ResumeChange[] {
-  if (changes.length === 0) return changes;
-
-  const baseline = scoreResumeATS(resumeText, job).overall;
-  const picked: ResumeChange[] = [];
-  let workingText = resumeText;
-
-  for (const change of changes) {
-    const candidate = buildFullTextFromChanges(workingText, [{ ...change, accepted: true }]);
-    const score = scoreResumeATS(candidate, job).overall;
-    if (score >= baseline) {
-      picked.push(change);
-      workingText = candidate;
-    }
-  }
-
-  if (picked.length > 0) return picked;
-
-  let best: ResumeChange | null = null;
-  let bestScore = baseline;
-  for (const change of changes) {
-    const candidate = buildFullTextFromChanges(resumeText, [{ ...change, accepted: true }]);
-    const score = scoreResumeATS(candidate, job).overall;
-    if (score > bestScore) {
-      bestScore = score;
-      best = change;
-    }
-  }
-
-  return best ? [best] : changes.slice(0, 1);
-}
-
 function finishTailorResult(
   resume: ParsedResume,
   job: JobPosting,
@@ -134,7 +99,7 @@ function finishTailorResult(
     .filter((c) => !isNoOpChange(c) && !isKeywordDumpChange(c))
     .map((c) => ({ ...c, accepted: true }));
 
-  const improved = pickScoreImprovingChanges(resume.plainText, job, filtered);
+  const improved = augmentChangesToTargetScore(resume, job, filtered, 85);
 
   let result: TailorResult = { changes: improved, fullText: '' };
   result = finalizeTailorResult(resume.plainText, result);
@@ -170,6 +135,7 @@ async function tryOneMicroEdit(
   if (spans.length === 0) return [];
 
   const keywords = extractTopJobTerms(job, 8);
+  const missing = getMissingKeywords(job, resume.plainText);
 
   for (const span of spans) {
     for (const jsonMode of [true, false]) {
@@ -177,7 +143,7 @@ async function tryOneMicroEdit(
         const raw = await chatOllamaMicro(
           settings,
           MICRO_SYSTEM_PROMPT,
-          buildSingleSpanPrompt(job.title, keywords, span),
+          buildSingleSpanPrompt(job.title, keywords, span, missing),
           jsonMode,
         );
         const revised = parseMicroRevision(raw);
@@ -286,13 +252,14 @@ async function tailorResumeInternal(
     result = parseTailorResponseWithRepair(raw);
   }
 
-  result.changes = pickScoreImprovingChanges(
-    resume.plainText,
+  result.changes = augmentChangesToTargetScore(
+    resume,
     job,
     result.changes
       .filter((c) => !isNoOpChange(c) && !isKeywordDumpChange(c))
       .slice(0, limits.maxChanges)
       .map((c) => ({ ...c, accepted: true })),
+    85,
   );
 
   result = finalizeTailorResult(resume.plainText, result);
