@@ -45,7 +45,7 @@ export async function captureJobFromTab(
         target: { tabId },
         files: [CONTENT_SCRIPT],
       });
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 600));
       response = await sendCapture();
     } catch {
       return {
@@ -76,6 +76,14 @@ export async function captureJobFromTab(
   return {
     error:
       response.error ??
-      'Could not extract a job description from this page. Open the full job posting, or paste manually.',
+      `Could not extract a job description from ${hostnameFromUrl(tabUrl)}. Open the full job posting (click a role from search results), expand “Show more” if shown, then capture again — or paste manually.`,
   };
+}
+
+function hostnameFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'this page';
+  }
 }

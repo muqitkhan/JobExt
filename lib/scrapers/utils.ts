@@ -8,19 +8,23 @@ export function stripHtml(html: string): string {
   return doc.body.textContent?.replace(/\s+/g, ' ').trim() ?? html.trim();
 }
 
-export function firstText(selectors: string[]): string {
+export function firstText(selectors: string[], root: ParentNode = document): string {
   for (const selector of selectors) {
-    const el = document.querySelector(selector);
+    const el = root.querySelector(selector);
     const value = textOf(el);
     if (value) return value;
   }
   return '';
 }
 
-export function collectLongestText(selectors: string[], minLength = 0): string {
+export function collectLongestTextIn(
+  selectors: string[],
+  root: ParentNode = document,
+  minLength = 0,
+): string {
   let best = '';
   for (const selector of selectors) {
-    document.querySelectorAll(selector).forEach((el) => {
+    root.querySelectorAll(selector).forEach((el) => {
       const value = textOf(el);
       if (value.length > best.length) best = value;
     });
@@ -38,6 +42,18 @@ const JOB_SIGNAL_WORDS = [
   'benefits',
   'about the role',
   'what you',
+  'we are looking',
+  "you'll",
+  'you will',
+  'must have',
+  'nice to have',
+  'role',
+  'position',
+  'salary',
+  'hybrid',
+  'remote',
+  'full-time',
+  'full time',
 ];
 
 const SEARCH_RESULT_NOISE = [
@@ -49,20 +65,21 @@ const SEARCH_RESULT_NOISE = [
 ];
 
 /** Heuristic: real JD text vs search chrome / side panels. */
-export function looksLikeJobDescription(text: string): boolean {
+export function looksLikeJobDescription(text: string, relaxed = false): boolean {
   const trimmed = text.trim();
-  if (trimmed.length < 120) return false;
+  if (trimmed.length < 80) return false;
+  if (relaxed && trimmed.length >= 120) return true;
 
   const lower = trimmed.toLowerCase();
   if (SEARCH_RESULT_NOISE.some((re) => re.test(lower))) return false;
 
   const applyCount = (trimmed.match(/\bapply\b/gi) ?? []).length;
-  if (applyCount >= 4 && trimmed.length < 2500) return false;
+  if (applyCount >= 5 && trimmed.length < 3000) return false;
 
   const signals = JOB_SIGNAL_WORDS.filter((w) => lower.includes(w)).length;
   if (signals >= 1) return true;
 
-  return trimmed.length >= 350;
+  return trimmed.length >= 280;
 }
 
 export function scoreDescriptionText(text: string): number {
@@ -104,6 +121,25 @@ export function collectBestText(
   }
 
   return best;
+}
+
+/** Prefer best-scored text, then longest — searches root first, then full document. */
+export function pickJobDescriptionText(
+  selectors: string[],
+  root?: ParentNode | null,
+  minLength = 40,
+): string {
+  const scopes: ParentNode[] = [];
+  if (root) scopes.push(root);
+  if (!root || root !== document) scopes.push(document);
+
+  for (const scope of scopes) {
+    const scored = collectBestText(selectors, scope, minLength);
+    if (scored) return scored;
+    const longest = collectLongestTextIn(selectors, scope, minLength);
+    if (longest) return longest;
+  }
+  return '';
 }
 
 export function collectByClassFragmentIn(

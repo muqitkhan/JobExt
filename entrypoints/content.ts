@@ -16,11 +16,13 @@ export default defineContentScript({
             return;
           }
           const description = result.description?.trim() ?? '';
-          if (description.length < 80 && !result.title?.trim()) {
+          if (description.length < 60) {
             sendResponse({
               type: 'JOB_CAPTURE_ERROR',
               error:
-                'Only a short snippet was found. Open the full job posting and click Show more, or paste the description manually.',
+                description.length === 0
+                  ? 'Could not find job description text on this page. Click a job listing to open the full post (not search results), expand “Show more” if needed, then capture again — or paste manually.'
+                  : 'Only a short snippet was found. Expand the full job description on the page, then capture again — or paste manually.',
             });
             return;
           }

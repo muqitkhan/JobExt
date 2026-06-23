@@ -52,11 +52,14 @@ describe('scrapeLinkedIn', () => {
 
   it('reads LinkedIn description markup and title', () => {
     document.body.innerHTML = `
-      <h1 class="top-card-layout__title">Product Designer</h1>
-      <a class="topcard__org-name-link">Design Co</a>
-      <div class="show-more-less-html__markup">
-        We are looking for a designer with Figma experience and strong communication skills.
-        You will own end-to-end product flows and collaborate with engineering teams daily.
+      <div class="jobs-search__job-details">
+        <h1 class="top-card-layout__title">Product Designer</h1>
+        <a class="topcard__org-name-link">Design Co</a>
+        <div class="show-more-less-html__markup">
+          We are looking for a designer with Figma experience and strong communication skills.
+          You will own end-to-end product flows and collaborate with engineering teams daily.
+          Requirements include prototyping, user research, and cross-functional partnership.
+        </div>
       </div>
     `;
     const result = scrapeLinkedIn();
