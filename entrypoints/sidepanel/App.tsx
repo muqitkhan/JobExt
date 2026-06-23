@@ -37,8 +37,6 @@ export default function App() {
   const [coverLetter, setCoverLetter] = useState<string | null>(null);
   const [coverLetterError, setCoverLetterError] = useState<string | null>(null);
 
-  const displayScore = tailoredScore ?? baselineScore;
-
   const hasResume = Boolean(resume?.plainText?.trim());
   const hasJob = Boolean(job?.description?.trim());
   const canScore = hasResume && hasJob;
@@ -62,6 +60,8 @@ export default function App() {
     const tailoredText = buildFullTextFromChanges(resume.plainText, changes);
     return scoreResumeATS(tailoredText, job);
   }, [canScore, hasTailored, job, resume, changes]);
+
+  const displayScore = tailoredScore ?? baselineScore;
 
   useEffect(() => {
     void isSetupComplete().then((done) => {

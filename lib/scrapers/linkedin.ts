@@ -1,7 +1,6 @@
 import type { ScrapeResult } from './types';
 import {
   collectBestText,
-  collectByClassFragment,
   collectByClassFragmentIn,
   firstText,
   metaContent,

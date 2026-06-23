@@ -29,7 +29,7 @@ Job: ${jobExcerpt}
 Resume: ${resumeExcerpt}
 Return only the letter body.`;
 
-  const chat = chatLLM(settings, system, user, { jsonMode: false, maxTokens: cloud ? 700 : 900 });
+  const chat = chatLLM(settings, system, user, { jsonMode: false });
 
   // Local Ollama: no outer timeout — let the model finish; cloud keeps a generous cap.
   if (settings.provider === 'ollama') {
