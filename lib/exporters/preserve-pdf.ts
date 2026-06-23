@@ -1,7 +1,8 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 import type { PdfTextRun, ResumeChange } from '../types';
 import { findOriginalSpan } from '../llm/prompts';
 import { sanitizeForPdfText } from './pdf-text';
+import { alignBlocksToTailored } from './text-align';
 
 interface BBox {
   x: number;
@@ -16,6 +17,13 @@ interface RunSpanIndex {
   run: PdfTextRun;
   start: number;
   end: number;
+}
+
+interface PdfLine {
+  pageIndex: number;
+  y: number;
+  runs: PdfTextRun[];
+  text: string;
 }
 
 function bboxFromRuns(runs: PdfTextRun[]): BBox {
@@ -88,6 +96,88 @@ export function findPhraseRuns(runs: PdfTextRun[], phrase: string): PdfTextRun[]
   return null;
 }
 
+export function groupRunsIntoLines(runs: PdfTextRun[]): PdfLine[] {
+  const yThreshold = 4;
+  const lines: PdfLine[] = [];
+
+  for (const run of runs) {
+    let line = lines.find(
+      (entry) => entry.pageIndex === run.pageIndex && Math.abs(entry.y - run.y) <= yThreshold,
+    );
+    if (!line) {
+      lines.push({ pageIndex: run.pageIndex, y: run.y, runs: [run], text: run.str });
+      continue;
+    }
+    line.runs.push(run);
+    line.y = (line.y + run.y) / 2;
+    line.text += run.str;
+  }
+
+  for (const line of lines) {
+    line.runs.sort((a, b) => a.x - b.x);
+    line.text = line.runs.map((run) => run.str).join('');
+  }
+
+  return lines.sort(
+    (a, b) => b.pageIndex - a.pageIndex || b.y - a.y || (a.runs[0]?.x ?? 0) - (b.runs[0]?.x ?? 0),
+  );
+}
+
+function wrapTextToWidth(text: string, font: PDFFont, fontSize: number, maxWidth: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    const width = font.widthOfTextAtSize(test, fontSize);
+    if (width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [''];
+}
+
+function drawLineOverlay(
+  page: ReturnType<PDFDocument['getPages']>[number],
+  box: BBox,
+  text: string,
+  font: PDFFont,
+  pageWidth: number,
+): void {
+  const fontSize = Math.min(Math.max(box.fontSize, 8), 14);
+  const maxWidth = Math.max(box.width, pageWidth - box.x - 36);
+  const lines = wrapTextToWidth(text, font, fontSize, maxWidth);
+  const lineHeight = fontSize * 1.25;
+  const totalHeight = Math.max(box.height, lines.length * lineHeight);
+  const pad = 2;
+
+  page.drawRectangle({
+    x: box.x - pad,
+    y: box.y - pad,
+    width: maxWidth + pad * 2,
+    height: totalHeight + pad * 2,
+    color: rgb(1, 1, 1),
+    borderWidth: 0,
+  });
+
+  for (let i = 0; i < lines.length; i++) {
+    page.drawText(lines[i], {
+      x: box.x,
+      y: box.y - i * lineHeight,
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  }
+}
+
 export async function exportPdfPreserve(
   sourceBytes: ArrayBuffer,
   textRuns: PdfTextRun[],
@@ -108,24 +198,43 @@ export async function exportPdfPreserve(
     if (!page) continue;
 
     const revised = sanitizeForPdfText(change.revised);
-    const pad = 2;
+    drawLineOverlay(page, box, revised, font, page.getWidth());
+    appliedCount++;
+  }
 
-    page.drawRectangle({
-      x: box.x - pad,
-      y: box.y - pad,
-      width: box.width + pad * 2,
-      height: box.height + pad * 2,
-      color: rgb(1, 1, 1),
-      borderWidth: 0,
-    });
+  const bytes = await pdfDoc.save();
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return { buffer, appliedCount };
+}
 
-    page.drawText(revised, {
-      x: box.x,
-      y: box.y,
-      size: Math.min(box.fontSize, 14),
-      font,
-      color: rgb(0, 0, 0),
-    });
+/** Overlay only changed PDF lines so untouched text keeps original fonts and colors. */
+export async function exportPdfLineSync(
+  sourceBytes: ArrayBuffer,
+  textRuns: PdfTextRun[],
+  originalPlain: string,
+  tailoredPlain: string,
+): Promise<{ buffer: ArrayBuffer; appliedCount: number }> {
+  const lines = groupRunsIntoLines(textRuns);
+  const lineTexts = lines.map((line) => line.text);
+  const replacements = alignBlocksToTailored(lineTexts, originalPlain, tailoredPlain);
+  if (replacements.size === 0) {
+    return { buffer: sourceBytes.slice(0), appliedCount: 0 };
+  }
+
+  const pdfDoc = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const pages = pdfDoc.getPages();
+  let appliedCount = 0;
+
+  for (const [lineIndex, revisedText] of replacements.entries()) {
+    const line = lines[lineIndex];
+    if (!line || line.runs.length === 0) continue;
+
+    const page = pages[line.pageIndex];
+    if (!page) continue;
+
+    const box = bboxFromRuns(line.runs);
+    drawLineOverlay(page, box, sanitizeForPdfText(revisedText), font, page.getWidth());
     appliedCount++;
   }
 

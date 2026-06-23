@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import type { ResumeChange } from '../types';
 import { applyChangeToText, findOriginalSpan } from '../llm/prompts';
+import { alignBlocksToTailored } from './text-align';
 
 function escapeXml(text: string): string {
   return text
@@ -152,14 +153,96 @@ export function replaceInDocxXml(
     const re = new RegExp(pattern);
     const match = re.exec(xml);
     if (match) {
+      const firstRun = match[0].match(/<w:r\b[^>]*>/);
+      const runOpen = firstRun?.[0] ?? '<w:r>';
+      const replacement = `${runOpen}<w:t>${escapedRev}</w:t></w:r>`;
       return {
-        xml: xml.slice(0, match.index) + `<w:t>${escapedRev}</w:t>` + xml.slice(match.index + match[0].length),
+        xml: xml.slice(0, match.index) + replacement + xml.slice(match.index + match[0].length),
         applied: true,
       };
     }
   }
 
   return { xml, applied: false };
+}
+
+const PARAGRAPH_RE = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+
+/** Replace paragraph body text while keeping paragraph + first-run styling. */
+export function replaceParagraphText(paragraphXml: string, newText: string): string {
+  const pOpen = paragraphXml.match(/<w:p\b[^>]*>/)?.[0] ?? '<w:p>';
+  const pPrMatch = paragraphXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+  const pPr = pPrMatch?.[0] ?? '';
+
+  const firstRun = paragraphXml.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/);
+  const rPrMatch = firstRun?.[0].match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
+  const rPr = rPrMatch?.[0] ?? '';
+
+  const preserveSpace =
+    newText.startsWith(' ') || newText.endsWith(' ') || /\s{2,}/.test(newText)
+      ? ' xml:space="preserve"'
+      : '';
+
+  return `${pOpen}${pPr}<w:r>${rPr}<w:t${preserveSpace}>${escapeXml(newText)}</w:t></w:r></w:p>`;
+}
+
+/** Sync tailored plain text into DOCX paragraphs, preserving layout and run styles. */
+export function syncDocxXmlToTailored(
+  xml: string,
+  originalPlain: string,
+  tailoredPlain: string,
+): { xml: string; appliedCount: number } {
+  const paragraphs = [...xml.matchAll(PARAGRAPH_RE)];
+  if (paragraphs.length === 0) return { xml, appliedCount: 0 };
+
+  const paragraphTexts = paragraphs.map((match) => extractPlainFromDocxXml(match[0]));
+  const replacements = alignBlocksToTailored(paragraphTexts, originalPlain, tailoredPlain);
+  if (replacements.size === 0) return { xml, appliedCount: 0 };
+
+  let result = xml;
+  let offset = 0;
+  let appliedCount = 0;
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const repl = replacements.get(i);
+    if (!repl) continue;
+
+    const oldPara = paragraphs[i][0];
+    const newPara = replaceParagraphText(oldPara, repl);
+    const idx = paragraphs[i].index! + offset;
+    result = result.slice(0, idx) + newPara + result.slice(idx + oldPara.length);
+    offset += newPara.length - oldPara.length;
+    appliedCount++;
+  }
+
+  return { xml: result, appliedCount };
+}
+
+export async function exportDocxParagraphSync(
+  sourceBytes: ArrayBuffer,
+  originalPlain: string,
+  tailoredPlain: string,
+): Promise<{ buffer: ArrayBuffer; appliedCount: number }> {
+  const zip = await JSZip.loadAsync(sourceBytes);
+  let appliedCount = 0;
+
+  const xmlPaths = Object.keys(zip.files).filter(
+    (path) => /^word\/(document|header\d+|footer\d+|footnotes|endnotes)\.xml$/.test(path),
+  );
+
+  for (const path of xmlPaths) {
+    const file = zip.file(path);
+    if (!file) continue;
+    const xml = await file.async('string');
+    const synced = syncDocxXmlToTailored(xml, originalPlain, tailoredPlain);
+    if (synced.appliedCount > 0) {
+      zip.file(path, synced.xml);
+      appliedCount += synced.appliedCount;
+    }
+  }
+
+  const buffer = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
+  return { buffer, appliedCount };
 }
 
 export async function exportDocxPreserve(
@@ -179,9 +262,9 @@ export async function exportDocxPreserve(
     const file = zip.file(path);
     if (!file) continue;
     let xml = await file.async('string');
-    const xmlPlain = extractPlainFromDocxXml(xml);
 
     for (const change of accepted) {
+      const xmlPlain = extractPlainFromDocxXml(xml);
       const variants = buildOriginalVariants(change.original, plainText, xmlPlain);
       for (const original of variants) {
         const result = replaceInDocxXml(xml, original, change.revised, plainText);
